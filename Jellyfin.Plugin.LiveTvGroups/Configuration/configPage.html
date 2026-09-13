@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>Live TV Groups</title>
+</head>
+<body>
+<div id="LiveTvGroupsConfigPage" data-role="page" class="page type-interior pluginConfigurationPage"
+     data-require="emby-input,emby-button,emby-checkbox">
+    <div data-role="content">
+        <div class="content-primary">
+            <form id="LiveTvGroupsConfigForm">
+
+                <div class="verticalSection">
+                    <p class="fieldDescription">
+                        Jellyfin reads <code>group-title</code> from your M3U playlists and then discards it,
+                        so no client can browse Live TV by category. This plugin reads the playlists back,
+                        parses the groups, and serves them at
+                        <code>GET /LiveTvGroups/Groups</code> keyed to Jellyfin channel ids.
+                    </p>
+                    <p class="fieldDescription">
+                        Nothing to configure to get started: the playlists come from the M3U tuners already
+                        set up under Dashboard &rarr; Live TV.
+                    </p>
+                </div>
+
+                <div class="verticalSection">
+                    <h2 class="sectionTitle">Reading the playlist</h2>
+
+                    <div class="inputContainer">
+                        <input is="emby-input" type="number" id="cacheMinutes" min="0" max="1440" step="1"
+                               label="Cache the parsed playlist for (minutes)" />
+                        <div class="fieldDescription">
+                            Playlists change rarely and can be several megabytes. 0 re-reads on every request.
+                        </div>
+                    </div>
+
+                    <div class="inputContainer">
+                        <input is="emby-input" type="number" id="requestTimeoutSeconds" min="5" max="600" step="1"
+                               label="Playlist download timeout (seconds)" />
+                    </div>
+
+                    <div class="inputContainer">
+                        <input is="emby-input" type="text" id="ungroupedName"
+                               label="Name for channels with no group" />
+                        <div class="fieldDescription">
+                            Also collects channels that no playlist entry matched, so nothing is unreachable.
+                        </div>
+                    </div>
+
+                    <label class="checkboxContainer">
+                        <input is="emby-checkbox" type="checkbox" id="sortGroupsAlphabetically" />
+                        <span>Sort groups by name instead of playlist order</span>
+                    </label>
+                </div>
+
+                <div class="verticalSection">
+                    <button is="emby-button" type="submit" class="raised button-submit block">
+                        <span>Save</span>
+                    </button>
+                    <button is="emby-button" type="button" class="raised block" id="testGroups">
+                        <span>Re-read playlists and show what matched</span>
+                    </button>
+                    <div id="groupsResult" class="fieldDescription" style="margin-top:1em;"></div>
+                </div>
+
+            </form>
+        </div>
+    </div>
+
+    <script type="text/javascript">
+        (function () {
+            var pluginId = '5f2b9c14-8d7a-4e63-b1a0-3c6e9f04d2a8';
+
+            function load() {
+                Dashboard.showLoadingMsg();
+                ApiClient.getPluginConfiguration(pluginId).then(function (config) {
+                    document.querySelector('#cacheMinutes').value = config.CacheMinutes;
+                    document.querySelector('#requestTimeoutSeconds').value = config.RequestTimeoutSeconds;
+                    document.querySelector('#ungroupedName').value = config.UngroupedName || 'Ungrouped';
+                    document.querySelector('#sortGroupsAlphabetically').checked = !!config.SortGroupsAlphabetically;
+                    Dashboard.hideLoadingMsg();
+                });
+            }
+
+            function save(e) {
+                e.preventDefault();
+                Dashboard.showLoadingMsg();
+
+                ApiClient.getPluginConfiguration(pluginId).then(function (config) {
+                    config.CacheMinutes = parseInt(document.querySelector('#cacheMinutes').value, 10) || 0;
+                    config.RequestTimeoutSeconds = parseInt(document.querySelector('#requestTimeoutSeconds').value, 10) || 60;
+                    config.UngroupedName = document.querySelector('#ungroupedName').value || 'Ungrouped';
+                    config.SortGroupsAlphabetically = document.querySelector('#sortGroupsAlphabetically').checked;
+
+                    ApiClient.updatePluginConfiguration(pluginId, config).then(function (result) {
+                        Dashboard.processPluginConfigurationUpdateResult(result);
+                    });
+                });
+
+                return false;
+            }
+
+            function describe(data) {
+                var lines = [];
+                lines.push(data.Groups.length + ' groups from ' + data.PlaylistCount + ' M3U tuner(s)');
+                lines.push(data.MatchedChannels + ' of ' + data.TotalChannels +
+                    ' channels matched, from ' + data.PlaylistEntries + ' playlist entries');
+
+                if (data.Groups.length) {
+                    lines.push('');
+                    data.Groups.slice(0, 25).forEach(function (g) {
+                        lines.push('  ' + g.Name + ' — ' + g.ChannelIds.length);
+                    });
+                    if (data.Groups.length > 25) {
+                        lines.push('  … and ' + (data.Groups.length - 25) + ' more');
+                    }
+                }
+
+                (data.Errors || []).forEach(function (err) {
+                    lines.push('Error: ' + err);
+                });
+
+                return lines.join('\n');
+            }
+
+            function test() {
+                var output = document.querySelector('#groupsResult');
+                output.textContent = 'Reading playlists…';
+                output.style.whiteSpace = 'pre';
+
+                ApiClient.ajax({
+                    type: 'POST',
+                    url: ApiClient.getUrl('LiveTvGroups/Refresh')
+                }).then(function () {
+                    return ApiClient.getJSON(ApiClient.getUrl('LiveTvGroups/Groups'));
+                }).then(function (data) {
+                    output.textContent = describe(data);
+                }).catch(function (err) {
+                    output.textContent = 'Failed: ' + (err && err.message ? err.message : err);
+                });
+            }
+
+            var page = document.querySelector('#LiveTvGroupsConfigPage');
+            page.addEventListener('pageshow', load);
+            document.querySelector('#LiveTvGroupsConfigForm').addEventListener('submit', save);
+            document.querySelector('#testGroups').addEventListener('click', test);
+        })();
+    </script>
+</div>
+</body>
+</html>

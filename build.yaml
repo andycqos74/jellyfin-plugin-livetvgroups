@@ -1,0 +1,21 @@
+---
+name: "Live TV Groups"
+guid: "5f2b9c14-8d7a-4e63-b1a0-3c6e9f04d2a8"
+version: "1.0.0.0"
+targetAbi: "10.11.0.0"
+framework: "net9.0"
+owner: "andycowan"
+overview: "M3U group-title categories over the API"
+description: >
+  Jellyfin parses group-title out of an M3U playlist and then discards it, so no
+  client can browse Live TV by category. This plugin reads the configured M3U
+  tuners' playlists, parses the groups, matches each entry to the channel Jellyfin
+  created from it, and serves the result at GET /LiveTvGroups/Groups.
+category: "Live TV"
+artifacts:
+  - "Jellyfin.Plugin.LiveTvGroups.dll"
+changelog: >
+  ## 1.0.0.0
+  Initial release: group-title categories exposed over the API, with playlist
+  caching, alphabetical or playlist ordering, and a catch-all group for channels
+  no playlist entry matched.

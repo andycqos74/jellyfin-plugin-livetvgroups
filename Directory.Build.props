@@ -1,0 +1,7 @@
+<Project>
+  <PropertyGroup>
+    <!-- Plugins are loaded by the host; no satellite assemblies or dep files needed. -->
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+</Project>
