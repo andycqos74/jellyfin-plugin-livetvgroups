@@ -24,6 +24,22 @@
                 </div>
 
                 <div class="verticalSection">
+                    <h2 class="sectionTitle">Categories</h2>
+                    <p class="fieldDescription">
+                        Order is what clients show. Move a category up or down to change its position, or
+                        hide it to leave it out entirely. Categories your playlist gains later are added to
+                        the end automatically, so nothing disappears while you are not looking.
+                    </p>
+
+                    <button is="emby-button" type="button" class="raised block" id="loadGroups">
+                        <span>Load categories from playlists</span>
+                    </button>
+
+                    <div id="groupsStatus" class="fieldDescription" style="margin:0.6em 0;"></div>
+                    <div id="groupsList"></div>
+                </div>
+
+                <div class="verticalSection">
                     <h2 class="sectionTitle">Reading the playlist</h2>
 
                     <div class="inputContainer">
@@ -31,6 +47,7 @@
                                label="Cache the parsed playlist for (minutes)" />
                         <div class="fieldDescription">
                             Playlists change rarely and can be several megabytes. 0 re-reads on every request.
+                            Category order and visibility apply immediately either way.
                         </div>
                     </div>
 
@@ -49,7 +66,7 @@
 
                     <label class="checkboxContainer">
                         <input is="emby-checkbox" type="checkbox" id="sortGroupsAlphabetically" />
-                        <span>Sort groups by name instead of playlist order</span>
+                        <span>Sort categories by name &mdash; applies only to ones you have not placed manually</span>
                     </label>
                 </div>
 
@@ -57,10 +74,6 @@
                     <button is="emby-button" type="submit" class="raised button-submit block">
                         <span>Save</span>
                     </button>
-                    <button is="emby-button" type="button" class="raised block" id="testGroups">
-                        <span>Re-read playlists and show what matched</span>
-                    </button>
-                    <div id="groupsResult" class="fieldDescription" style="margin-top:1em;"></div>
                 </div>
 
             </form>
@@ -71,6 +84,124 @@
         (function () {
             var pluginId = '5f2b9c14-8d7a-4e63-b1a0-3c6e9f04d2a8';
 
+            // Display order, each { Name, Hidden, Count, Missing }.
+            var groups = [];
+
+            function esc(value) {
+                return String(value == null ? '' : value)
+                    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+            }
+
+            function render() {
+                var list = document.querySelector('#groupsList');
+
+                if (!groups.length) {
+                    list.innerHTML = '';
+                    return;
+                }
+
+                list.innerHTML = groups.map(function (group, index) {
+                    var count = group.Missing
+                        ? 'not in the playlist'
+                        : group.Count + (group.Count === 1 ? ' channel' : ' channels');
+
+                    return '' +
+                        '<div class="listItem" style="display:flex;align-items:center;gap:0.6em;padding:0.35em 0;">' +
+                            '<span style="flex:1;min-width:0;' + (group.Hidden ? 'opacity:.5;' : '') + '">' +
+                                '<span style="display:block;">' + esc(group.Name) + '</span>' +
+                                '<span class="fieldDescription" style="display:block;margin:0;">' + esc(count) + '</span>' +
+                            '</span>' +
+                            '<label class="checkboxContainer" style="margin:0;white-space:nowrap;">' +
+                                '<input is="emby-checkbox" type="checkbox" data-hide="' + index + '"' +
+                                    (group.Hidden ? ' checked' : '') + ' />' +
+                                '<span>Hide</span>' +
+                            '</label>' +
+                            '<button is="emby-button" type="button" class="raised" data-up="' + index + '"' +
+                                (index === 0 ? ' disabled' : '') + '><span>&uarr;</span></button>' +
+                            '<button is="emby-button" type="button" class="raised" data-down="' + index + '"' +
+                                (index === groups.length - 1 ? ' disabled' : '') + '><span>&darr;</span></button>' +
+                        '</div>';
+                }).join('');
+
+                list.querySelectorAll('[data-up]').forEach(function (button) {
+                    button.addEventListener('click', function () {
+                        move(parseInt(button.getAttribute('data-up'), 10), -1);
+                    });
+                });
+                list.querySelectorAll('[data-down]').forEach(function (button) {
+                    button.addEventListener('click', function () {
+                        move(parseInt(button.getAttribute('data-down'), 10), 1);
+                    });
+                });
+                list.querySelectorAll('[data-hide]').forEach(function (box) {
+                    box.addEventListener('change', function () {
+                        groups[parseInt(box.getAttribute('data-hide'), 10)].Hidden = box.checked;
+                        render();
+                    });
+                });
+            }
+
+            function move(index, delta) {
+                var target = index + delta;
+                if (target < 0 || target >= groups.length) {
+                    return;
+                }
+
+                var moved = groups[index];
+                groups[index] = groups[target];
+                groups[target] = moved;
+                render();
+            }
+
+            function status(text) {
+                document.querySelector('#groupsStatus').textContent = text;
+            }
+
+            /**
+             * The endpoint already returns saved order first, so its order is the
+             * display order. Saved categories the playlist no longer has are kept at
+             * the end rather than dropped, so a provider blip does not lose a position.
+             */
+            function loadGroups(saved) {
+                status('Reading playlists…');
+
+                return ApiClient.getJSON(ApiClient.getUrl('LiveTvGroups/Groups', { includeHidden: true }))
+                    .then(function (data) {
+                        var seen = {};
+                        groups = data.Groups.map(function (group) {
+                            seen[group.Name.toLowerCase()] = true;
+                            return {
+                                Name: group.Name,
+                                Hidden: !!group.Hidden,
+                                Count: group.ChannelIds.length,
+                                Missing: false
+                            };
+                        });
+
+                        (saved || []).forEach(function (entry) {
+                            if (entry.Name && !seen[entry.Name.toLowerCase()]) {
+                                groups.push({
+                                    Name: entry.Name,
+                                    Hidden: !!entry.Hidden,
+                                    Count: 0,
+                                    Missing: true
+                                });
+                            }
+                        });
+
+                        status(
+                            data.Groups.length + ' categories from ' + data.PlaylistCount + ' M3U tuner(s) · ' +
+                            data.MatchedChannels + ' of ' + data.TotalChannels + ' channels matched' +
+                            ((data.Errors || []).length ? ' · ' + data.Errors.join('; ') : '')
+                        );
+                        render();
+                    })
+                    .catch(function (err) {
+                        status('Could not read the playlists: ' + (err && err.message ? err.message : err));
+                    });
+            }
+
             function load() {
                 Dashboard.showLoadingMsg();
                 ApiClient.getPluginConfiguration(pluginId).then(function (config) {
@@ -78,7 +209,9 @@
                     document.querySelector('#requestTimeoutSeconds').value = config.RequestTimeoutSeconds;
                     document.querySelector('#ungroupedName').value = config.UngroupedName || 'Ungrouped';
                     document.querySelector('#sortGroupsAlphabetically').checked = !!config.SortGroupsAlphabetically;
+
                     Dashboard.hideLoadingMsg();
+                    loadGroups(config.Groups);
                 });
             }
 
@@ -91,6 +224,9 @@
                     config.RequestTimeoutSeconds = parseInt(document.querySelector('#requestTimeoutSeconds').value, 10) || 60;
                     config.UngroupedName = document.querySelector('#ungroupedName').value || 'Ungrouped';
                     config.SortGroupsAlphabetically = document.querySelector('#sortGroupsAlphabetically').checked;
+                    config.Groups = groups.map(function (group) {
+                        return { Name: group.Name, Hidden: group.Hidden };
+                    });
 
                     ApiClient.updatePluginConfiguration(pluginId, config).then(function (result) {
                         Dashboard.processPluginConfigurationUpdateResult(result);
@@ -100,50 +236,21 @@
                 return false;
             }
 
-            function describe(data) {
-                var lines = [];
-                lines.push(data.Groups.length + ' groups from ' + data.PlaylistCount + ' M3U tuner(s)');
-                lines.push(data.MatchedChannels + ' of ' + data.TotalChannels +
-                    ' channels matched, from ' + data.PlaylistEntries + ' playlist entries');
-
-                if (data.Groups.length) {
-                    lines.push('');
-                    data.Groups.slice(0, 25).forEach(function (g) {
-                        lines.push('  ' + g.Name + ' — ' + g.ChannelIds.length);
-                    });
-                    if (data.Groups.length > 25) {
-                        lines.push('  … and ' + (data.Groups.length - 25) + ' more');
-                    }
-                }
-
-                (data.Errors || []).forEach(function (err) {
-                    lines.push('Error: ' + err);
-                });
-
-                return lines.join('\n');
-            }
-
-            function test() {
-                var output = document.querySelector('#groupsResult');
-                output.textContent = 'Reading playlists…';
-                output.style.whiteSpace = 'pre';
-
+            function reload() {
                 ApiClient.ajax({
                     type: 'POST',
                     url: ApiClient.getUrl('LiveTvGroups/Refresh')
                 }).then(function () {
-                    return ApiClient.getJSON(ApiClient.getUrl('LiveTvGroups/Groups'));
-                }).then(function (data) {
-                    output.textContent = describe(data);
-                }).catch(function (err) {
-                    output.textContent = 'Failed: ' + (err && err.message ? err.message : err);
+                    return ApiClient.getPluginConfiguration(pluginId);
+                }).then(function (config) {
+                    return loadGroups(config.Groups);
                 });
             }
 
             var page = document.querySelector('#LiveTvGroupsConfigPage');
             page.addEventListener('pageshow', load);
             document.querySelector('#LiveTvGroupsConfigForm').addEventListener('submit', save);
-            document.querySelector('#testGroups').addEventListener('click', test);
+            document.querySelector('#loadGroups').addEventListener('click', reload);
         })();
     </script>
 </div>

@@ -15,6 +15,12 @@ public class ChannelGroupDto
     /// <c>/LiveTv/Channels</c> returns, so a client can use them directly.
     /// </summary>
     public IReadOnlyList<Guid> ChannelIds { get; set; } = Array.Empty<Guid>();
+
+    /// <summary>
+    /// Only ever true in the settings page's listing, which asks for hidden groups
+    /// so they can be turned back on.
+    /// </summary>
+    public bool Hidden { get; set; }
 }
 
 /// <summary>

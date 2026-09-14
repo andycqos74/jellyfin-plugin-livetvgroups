@@ -57,7 +57,81 @@ public class ChannelGroupService
         _cachedAt = DateTime.MinValue;
     }
 
-    public async Task<ChannelGroupsResultDto> GetGroupsAsync(CancellationToken cancellationToken)
+    /// <summary>
+    /// The grouping as configured: manual order first, hidden groups dropped unless
+    /// <paramref name="includeHidden"/> is set (the settings page needs to list them).
+    /// </summary>
+    public async Task<ChannelGroupsResultDto> GetGroupsAsync(
+        bool includeHidden,
+        CancellationToken cancellationToken)
+    {
+        var raw = await GetRawAsync(cancellationToken).ConfigureAwait(false);
+        return Project(raw, includeHidden);
+    }
+
+    /// <summary>
+    /// Ordering and visibility are applied on the way out rather than baked into the
+    /// cache, so saving the settings page takes effect on the next request instead of
+    /// after the playlist cache expires.
+    /// </summary>
+    private static ChannelGroupsResultDto Project(ChannelGroupsResultDto raw, bool includeHidden)
+    {
+        var config = Config;
+        var settings = config.Groups ?? Array.Empty<GroupSetting>();
+
+        var position = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var hidden = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        for (var i = 0; i < settings.Length; i++)
+        {
+            var name = settings[i].Name;
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                continue;
+            }
+
+            position[name] = i;
+            if (settings[i].Hidden)
+            {
+                hidden.Add(name);
+            }
+        }
+
+        var visible = raw.Groups
+            .Where(g => includeHidden || !hidden.Contains(g.Name))
+            .Select(g => new ChannelGroupDto
+            {
+                Name = g.Name,
+                ChannelIds = g.ChannelIds,
+                Hidden = hidden.Contains(g.Name)
+            })
+            .ToList();
+
+        var manual = visible
+            .Where(g => position.ContainsKey(g.Name))
+            .OrderBy(g => position[g.Name]);
+
+        // Groups the playlist has gained since the settings were saved keep their
+        // playlist order and follow the manual ones, rather than vanishing.
+        IEnumerable<ChannelGroupDto> rest = visible.Where(g => !position.ContainsKey(g.Name));
+        if (config.SortGroupsAlphabetically)
+        {
+            rest = rest.OrderBy(g => g.Name, StringComparer.CurrentCultureIgnoreCase);
+        }
+
+        return new ChannelGroupsResultDto
+        {
+            Groups = manual.Concat(rest).ToList(),
+            TotalChannels = raw.TotalChannels,
+            MatchedChannels = raw.MatchedChannels,
+            PlaylistEntries = raw.PlaylistEntries,
+            PlaylistCount = raw.PlaylistCount,
+            Errors = raw.Errors,
+            GeneratedAt = raw.GeneratedAt
+        };
+    }
+
+    private async Task<ChannelGroupsResultDto> GetRawAsync(CancellationToken cancellationToken)
     {
         var ttl = TimeSpan.FromMinutes(Math.Max(0, Config.CacheMinutes));
 
@@ -167,13 +241,9 @@ public class ChannelGroupService
             list.AddRange(leftovers.Select(c => c.Id));
         }
 
-        var ordered = Config.SortGroupsAlphabetically
-            ? groupOrder.OrderBy(n => n, StringComparer.CurrentCultureIgnoreCase).ToList()
-            : groupOrder;
-
         return new ChannelGroupsResultDto
         {
-            Groups = ordered
+            Groups = groupOrder
                 .Select(name => new ChannelGroupDto { Name = name, ChannelIds = groups[name] })
                 .ToList(),
             TotalChannels = channels.Count,

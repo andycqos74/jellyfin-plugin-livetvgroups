@@ -32,10 +32,17 @@ public class LiveTvGroupsController : ControllerBase
     /// Readable by any authenticated user: it exposes group names and channel ids,
     /// never the playlist URL or tuner credentials.
     /// </remarks>
+    /// <param name="includeHidden">
+    /// Include groups hidden in the settings, flagged as such. The settings page asks
+    /// for these so they can be reordered and turned back on; clients should not.
+    /// </param>
+    /// <param name="cancellationToken">Cancellation token.</param>
     [HttpGet("Groups")]
     [ProducesResponseType(StatusCodes.Status200OK)]
-    public async Task<ActionResult<ChannelGroupsResultDto>> GetGroups(CancellationToken cancellationToken)
-        => await _service.GetGroupsAsync(cancellationToken).ConfigureAwait(false);
+    public async Task<ActionResult<ChannelGroupsResultDto>> GetGroups(
+        [FromQuery] bool includeHidden,
+        CancellationToken cancellationToken)
+        => await _service.GetGroupsAsync(includeHidden, cancellationToken).ConfigureAwait(false);
 
     /// <summary>
     /// Drop the cached playlist so the next request re-reads it.
